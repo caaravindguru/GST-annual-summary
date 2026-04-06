@@ -43,7 +43,12 @@ def parse_excel(file_content: bytes, client_id: int):
     df = df.rename(columns=final_mapping)
 
     if 'invoice_date' in df.columns:
-        df['invoice_date'] = pd.to_datetime(df['invoice_date'], errors='coerce').dt.date
+        df['invoice_date'] = pd.to_datetime(df['invoice_date'], errors='coerce')
+        df['invoice_date'] = df['invoice_date'].where(df['invoice_date'].notna(), None).dt.date
+
+    if 'month' in df.columns:
+        # Pandas often parses 'Apr-24' as a datetime; convert to string
+        df['month'] = df['month'].apply(lambda x: x.strftime('%b-%y') if isinstance(x, pd.Timestamp) else str(x))
 
     # Ensure all expected columns exist and are cleaned
     for col in ['igst', 'cgst', 'sgst', 'taxable_value', 'rate']:
@@ -52,7 +57,7 @@ def parse_excel(file_content: bytes, client_id: int):
         else:
             df[col] = df[col].apply(clean_numeric)
 
-    # Fill non-numeric missing values
+    # Fill non-numeric missing values and handle NaN for SQLAlchemy compatibility
     for col in ['month', 'particular', 'gstin', 'trade_name', 'invoice_number', 'status']:
         if col not in df.columns:
             df[col] = ''
@@ -65,10 +70,16 @@ def parse_excel(file_content: bytes, client_id: int):
         df['status'] = 'Unknown'
 
     invoices = []
+    # Replace NaN with None for SQLAlchemy compatibility
+    df = df.where(pd.notnull(df), None)
+
     for _, row in df.iterrows():
-        # Clean row to only include model fields
+        # Clean row to only include model fields, exclude primary key 'id'
         row_dict = row.to_dict()
-        valid_fields = {k: v for k, v in row_dict.items() if k in models.Invoice.__table__.columns.keys()}
+        valid_fields = {
+            k: v for k, v in row_dict.items()
+            if k in models.Invoice.__table__.columns.keys() and k != 'id'
+        }
         invoices.append(models.Invoice(client_id=client_id, **valid_fields))
     return invoices
 
