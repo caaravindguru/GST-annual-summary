@@ -24,18 +24,21 @@ def parse_excel(file_content: bytes, client_id: int):
         df = pd.read_csv(file_like)
 
     column_mapping = {
-        'Mont': 'month', 'Particular': 'particular', 'GSTIN of supplier': 'gstin',
-        'Trade/Legal name': 'trade_name', 'Invoice number': 'invoice_number',
-        'Invoice Date': 'invoice_date', 'Rate(%)': 'rate', 'Taxable Value (₹)': 'taxable_value',
-        'IGST': 'igst', 'CGST': 'cgst', 'SGST': 'sgst', 'Status': 'status'
+        'month': 'month', 'mont': 'month', 'particular': 'particular',
+        'gstin': 'gstin', 'trade': 'trade_name', 'legal': 'trade_name',
+        'invoice number': 'invoice_number', 'invoice date': 'invoice_date',
+        'rate': 'rate', 'taxable value': 'taxable_value',
+        'igst': 'igst', 'cgst': 'cgst', 'sgst': 'sgst', 'status': 'status'
     }
 
     df.columns = [str(c).strip() for c in df.columns]
     final_mapping = {}
-    for k, v in column_mapping.items():
-        for c in df.columns:
-            if k.lower() in str(c).lower():
-                final_mapping[c] = v
+    # Prioritize exact matches first, then partial
+    for col in df.columns:
+        col_lower = col.lower()
+        for k, v in column_mapping.items():
+            if k in col_lower:
+                final_mapping[col] = v
                 break
     df = df.rename(columns=final_mapping)
 
@@ -78,37 +81,108 @@ def calculate_summary(db: Session, client_id: int):
     for month in months:
         m_invs = [i for i in invoices if i.month == month]
         t = turnovers.get(month)
-        s = {k: {'igst':0.0, 'cgst':0.0, 'sgst':0.0} for k in ['4a', 'rule_42', 'blocked', 'temp', 'reclaim']}
+        # GSTR-3B Table 4 structure
+        # 4A5: All other ITC
+        # 4B1: Reversals (Rule 42 + Permanent)
+        # 4B2: Reversals (Not in books + Temporary)
+        # 4C: Net ITC
+        s = {k: {'igst':0.0, 'cgst':0.0, 'sgst':0.0} for k in ['4a5', '4b1', '4b2', 'rule_42']}
         common = {'igst':0.0, 'cgst':0.0, 'sgst':0.0}
 
         for inv in m_invs:
-            if inv.particular == 'GSTR2B':
-                for k in ['igst', 'cgst', 'sgst']: s['4a'][k] += (getattr(inv, k) or 0.0)
-            if inv.status == 'Not in books' or (inv.status == 'Ineligible' and inv.sub_status != 'Blocked'):
-                for k in ['igst', 'cgst', 'sgst']: s['temp'][k] += (getattr(inv, k) or 0.0)
-            if inv.status == 'Ineligible' and inv.sub_status == 'Blocked':
-                for k in ['igst', 'cgst', 'sgst']: s['blocked'][k] += (getattr(inv, k) or 0.0)
-            if inv.is_common_itc and inv.status == 'Matched':
-                for k in ['igst', 'cgst', 'sgst']: common[k] += (getattr(inv, k) or 0.0)
-            if inv.status == 'Matched':
-                was_not = db.query(models.Invoice).filter(models.Invoice.client_id==client_id, models.Invoice.invoice_number==inv.invoice_number, models.Invoice.status=='Not in books').first()
-                if was_not:
-                    for k in ['igst', 'cgst', 'sgst']: s['reclaim'][k] += (getattr(inv, k) or 0.0)
+            # 4A5 includes almost everything from the 2B feed
+            for k in ['igst', 'cgst', 'sgst']:
+                val = getattr(inv, k) or 0.0
+                s['4a5'][k] += val
+
+                if inv.status == 'Not in books':
+                    s['4b2'][k] += val
+                elif inv.status == 'Ineligible':
+                    if str(inv.sub_status).lower() == 'permanent':
+                        s['4b1'][k] += val
+                    else:
+                        s['4b2'][k] += val
+
+                if inv.is_common_itc:
+                    common[k] += val
 
         if t and t.total_turnover > 0:
             ratio = (t.nil_rated_turnover + t.exempt_turnover) / t.total_turnover
-            for k in ['igst', 'cgst', 'sgst']: s['rule_42'][k] = common[k] * ratio
+            for k in ['igst', 'cgst', 'sgst']:
+                s['rule_42'][k] = common[k] * ratio
+                s['4b1'][k] += s['rule_42'][k]
 
-        net = {k: s['4a'][k] - (s['rule_42'][k] + s['blocked'][k] + s['temp'][k]) + s['reclaim'][k] for k in ['igst', 'cgst', 'sgst']}
-        summary.append({'month': month, 'table_4a': s['4a'], 'rule_42': s['rule_42'], 'blocked': s['blocked'], 'temp_reversal': s['temp'], 'reclaim_others': s['reclaim'], 'net_itc': net})
+        net = {k: s['4a5'][k] - s['4b1'][k] - s['4b2'][k] for k in ['igst', 'cgst', 'sgst']}
+        summary.append({
+            'month': month,
+            'table_4a5': s['4a5'],
+            'table_4b1': s['4b1'],
+            'table_4b2': s['4b2'],
+            'rule_42': s['rule_42'],
+            'net_itc': net
+        })
     return summary
 
 def export_to_excel(db: Session, client_id: int):
     summary = calculate_summary(db, client_id)
     invoices = db.query(models.Invoice).filter(models.Invoice.client_id == client_id).all()
     output = io.BytesIO()
+
+    # Prepare invoice-wise details for different tables
+    inv_list = []
+    for inv in invoices:
+        d = {
+            'Month': inv.month,
+            'Particulars': inv.particular,
+            'GSTIN': inv.gstin,
+            'Trade Name': inv.trade_name,
+            'Invoice No': inv.invoice_number,
+            'Date': inv.invoice_date,
+            'Taxable Value': inv.taxable_value,
+            'IGST': inv.igst,
+            'CGST': inv.cgst,
+            'SGST': inv.sgst,
+            'Status': inv.status,
+            'Sub-Status': inv.sub_status,
+            'Common ITC': 'Yes' if inv.is_common_itc else 'No'
+        }
+
+        # Classification for GSTR-3B
+        d['GSTR-3B Table'] = '4A(5)'
+        if inv.status == 'Not in books':
+            d['GSTR-3B Reversal'] = '4B(2)'
+        elif inv.status == 'Ineligible':
+            if str(inv.sub_status).lower() == 'permanent':
+                d['GSTR-3B Reversal'] = '4B(1)'
+            else:
+                d['GSTR-3B Reversal'] = '4B(2)'
+        else:
+            d['GSTR-3B Reversal'] = 'None'
+
+        inv_list.append(d)
+
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        pd.DataFrame([{'Month': s['month'], **{f"{k}_{t.upper()}": v for k, d in s.items() if isinstance(d, dict) for t, v in d.items()}} for s in summary]).to_excel(writer, sheet_name='Summary', index=False)
-        pd.DataFrame([i.__dict__ for i in invoices]).drop(columns=['_sa_instance_state']).to_excel(writer, sheet_name='Invoices', index=False)
+        # Summary Sheet
+        summary_df = pd.DataFrame([{
+            'Month': s['month'],
+            '4A(5) IGST': s['table_4a5']['igst'],
+            '4A(5) CGST': s['table_4a5']['cgst'],
+            '4A(5) SGST': s['table_4a5']['sgst'],
+            '4B(1) IGST': s['table_4b1']['igst'],
+            '4B(1) CGST': s['table_4b1']['cgst'],
+            '4B(1) SGST': s['table_4b1']['sgst'],
+            '4B(2) IGST': s['table_4b2']['igst'],
+            '4B(2) CGST': s['table_4b2']['cgst'],
+            '4B(2) SGST': s['table_4b2']['sgst'],
+            'Rule 42 IGST': s['rule_42']['igst'],
+            'Net ITC IGST': s['net_itc']['igst'],
+            'Net ITC CGST': s['net_itc']['cgst'],
+            'Net ITC SGST': s['net_itc']['sgst'],
+        } for s in summary])
+        summary_df.to_excel(writer, sheet_name='GSTR-3B Summary', index=False)
+
+        # Detailed Invoice Sheet
+        pd.DataFrame(inv_list).to_excel(writer, sheet_name='Invoice Details', index=False)
+
     output.seek(0)
     return output

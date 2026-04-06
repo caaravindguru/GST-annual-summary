@@ -129,7 +129,7 @@ function App() {
   }
 
   const totals = (summary || []).reduce((acc, curr) => {
-    const keys = ['table_4a', 'rule_42', 'blocked', 'temp_reversal', 'reclaim_others', 'net_itc'];
+    const keys = ['table_4a5', 'table_4b1', 'table_4b2', 'rule_42', 'net_itc'];
     keys.forEach(k => {
         if (curr[k]) {
             acc[k].igst += curr[k].igst || 0;
@@ -139,8 +139,8 @@ function App() {
     });
     return acc;
   }, {
-    table_4a: {igst:0, cgst:0, sgst:0}, rule_42: {igst:0, cgst:0, sgst:0}, blocked: {igst:0, cgst:0, sgst:0},
-    temp_reversal: {igst:0, cgst:0, sgst:0}, reclaim_others: {igst:0, cgst:0, sgst:0}, net_itc: {igst:0, cgst:0, sgst:0}
+    table_4a5: {igst:0, cgst:0, sgst:0}, table_4b1: {igst:0, cgst:0, sgst:0}, table_4b2: {igst:0, cgst:0, sgst:0},
+    rule_42: {igst:0, cgst:0, sgst:0}, net_itc: {igst:0, cgst:0, sgst:0}
   });
 
   if (!selectedClient) {
@@ -270,10 +270,15 @@ function App() {
                         </select>
                         </td>
                         <td className="p-5">
-                        <select value={inv.sub_status || ''} onChange={(e) => updateInvoice(inv.id, { sub_status: e.target.value })} className="border-2 border-slate-200 rounded-lg p-2 text-xs font-bold outline-none focus:border-blue-500">
+                        <select
+                            value={inv.sub_status || ''}
+                            onChange={(e) => updateInvoice(inv.id, { sub_status: e.target.value })}
+                            className="border-2 border-slate-200 rounded-lg p-2 text-xs font-bold outline-none focus:border-blue-500"
+                            disabled={inv.status !== 'Ineligible' && inv.status !== 'Not in books'}
+                        >
                             <option value="">N/A</option>
-                            <option value="Temp">Temporary</option>
-                            <option value="Blocked">Blocked (Permanent)</option>
+                            <option value="Temporary">Temporary</option>
+                            <option value="Permanent">Permanent/Blocked</option>
                         </select>
                         </td>
                         <td className="p-5 text-center">
@@ -299,16 +304,15 @@ function App() {
                 <thead className="bg-slate-900 text-white font-black uppercase tracking-widest">
                     <tr>
                     <th rowSpan="2" className="border-r border-slate-700 p-5 sticky left-0 bg-slate-900 z-10">MONTH</th>
-                    <th colSpan="3" className="border-r border-slate-700 p-3 bg-slate-800">Available (4A)</th>
-                    <th colSpan="3" className="border-r border-slate-700 p-3 bg-blue-900">Rule 42 Reversal</th>
-                    <th colSpan="3" className="border-r border-slate-700 p-3 bg-rose-900">Blocked Credit</th>
-                    <th colSpan="3" className="border-r border-slate-700 p-3 bg-amber-900">RR Reversal (4B2)</th>
-                    <th colSpan="3" className="border-r border-slate-700 p-3 bg-emerald-900">RR Reclaim Others</th>
-                    <th colSpan="3" className="p-3 bg-indigo-900">NET ITC AVAILABLE</th>
+                    <th colSpan="3" className="border-r border-slate-700 p-3 bg-slate-800">Available (4A5)</th>
+                    <th colSpan="3" className="border-r border-slate-700 p-3 bg-blue-900">Reversal (4B1)</th>
+                    <th colSpan="3" className="border-r border-slate-700 p-3 bg-rose-900">Reversal (4B2)</th>
+                    <th colSpan="3" className="border-r border-slate-700 p-3 bg-amber-900">Rule 42 (Breakout)</th>
+                    <th colSpan="3" className="p-3 bg-indigo-900">NET ITC (4C)</th>
                     </tr>
                     <tr className="bg-slate-800 text-[9px]">
-                    {['I','C','S','I','C','S','I','C','S','I','C','S','I','C','S','I','C','S'].map((h, i) => (
-                        <th key={i} className={`p-2 border-r border-slate-700 ${i > 14 ? 'bg-indigo-800' : ''}`}>{h}</th>
+                    {['I','C','S','I','C','S','I','C','S','I','C','S','I','C','S'].map((h, i) => (
+                        <th key={i} className={`p-2 border-r border-slate-700 ${i > 11 ? 'bg-indigo-800' : ''}`}>{h}</th>
                     ))}
                     </tr>
                 </thead>
@@ -316,11 +320,10 @@ function App() {
                     {(summary || []).map(s => (
                     <tr key={s.month} className="hover:bg-slate-50 font-mono font-bold text-slate-700">
                         <td className="p-4 border-r border-slate-100 bg-white sticky left-0 z-10 text-slate-900">{s.month}</td>
-                        <td className="p-2 border-r border-slate-50">{(s.table_4a?.igst || 0).toFixed(0)}</td><td className="p-2 border-r border-slate-50">{(s.table_4a?.cgst || 0).toFixed(0)}</td><td className="p-2 border-r border-slate-100">{(s.table_4a?.sgst || 0).toFixed(0)}</td>
-                        <td className="p-2 border-r border-slate-50 bg-blue-50 text-blue-700">{(s.rule_42?.igst || 0).toFixed(0)}</td><td className="p-2 border-r border-slate-50 bg-blue-50 text-blue-700">{(s.rule_42?.cgst || 0).toFixed(0)}</td><td className="p-2 border-r border-slate-100 bg-blue-50 text-blue-700">{(s.rule_42?.sgst || 0).toFixed(0)}</td>
-                        <td className="p-2 border-r border-slate-50 bg-rose-50 text-rose-700">{(s.blocked?.igst || 0).toFixed(0)}</td><td className="p-2 border-r border-slate-50 bg-rose-50 text-rose-700">{(s.blocked?.cgst || 0).toFixed(0)}</td><td className="p-2 border-r border-slate-100 bg-rose-50 text-rose-700">{(s.blocked?.sgst || 0).toFixed(0)}</td>
-                        <td className="p-2 border-r border-slate-50 bg-amber-50 text-amber-700">{(s.temp_reversal?.igst || 0).toFixed(0)}</td><td className="p-2 border-r border-slate-50 bg-amber-50 text-amber-700">{(s.temp_reversal?.cgst || 0).toFixed(0)}</td><td className="p-2 border-r border-slate-100 bg-amber-50 text-amber-700">{(s.temp_reversal?.sgst || 0).toFixed(0)}</td>
-                        <td className="p-2 border-r border-slate-50 bg-emerald-50 text-emerald-700">{(s.reclaim_others?.igst || 0).toFixed(0)}</td><td className="p-2 border-r border-slate-50 bg-emerald-50 text-emerald-700">{(s.reclaim_others?.cgst || 0).toFixed(0)}</td><td className="p-2 border-r border-slate-100 bg-emerald-50 text-emerald-700">{(s.reclaim_others?.sgst || 0).toFixed(0)}</td>
+                        <td className="p-2 border-r border-slate-50">{(s.table_4a5?.igst || 0).toFixed(0)}</td><td className="p-2 border-r border-slate-50">{(s.table_4a5?.cgst || 0).toFixed(0)}</td><td className="p-2 border-r border-slate-100">{(s.table_4a5?.sgst || 0).toFixed(0)}</td>
+                        <td className="p-2 border-r border-slate-50 bg-blue-50 text-blue-700">{(s.table_4b1?.igst || 0).toFixed(0)}</td><td className="p-2 border-r border-slate-50 bg-blue-50 text-blue-700">{(s.table_4b1?.cgst || 0).toFixed(0)}</td><td className="p-2 border-r border-slate-100 bg-blue-50 text-blue-700">{(s.table_4b1?.sgst || 0).toFixed(0)}</td>
+                        <td className="p-2 border-r border-slate-50 bg-rose-50 text-rose-700">{(s.table_4b2?.igst || 0).toFixed(0)}</td><td className="p-2 border-r border-slate-50 bg-rose-50 text-rose-700">{(s.table_4b2?.cgst || 0).toFixed(0)}</td><td className="p-2 border-r border-slate-100 bg-rose-50 text-rose-700">{(s.table_4b2?.sgst || 0).toFixed(0)}</td>
+                        <td className="p-2 border-r border-slate-50 bg-amber-50 text-amber-700">{(s.rule_42?.igst || 0).toFixed(0)}</td><td className="p-2 border-r border-slate-50 bg-amber-50 text-amber-700">{(s.rule_42?.cgst || 0).toFixed(0)}</td><td className="p-2 border-r border-slate-100 bg-amber-50 text-amber-700">{(s.rule_42?.sgst || 0).toFixed(0)}</td>
                         <td className="p-2 border-r border-slate-50 bg-indigo-50 text-indigo-900 font-black">{(s.net_itc?.igst || 0).toFixed(0)}</td>
                         <td className="p-2 border-r border-slate-50 bg-indigo-50 text-indigo-900 font-black">{(s.net_itc?.cgst || 0).toFixed(0)}</td>
                         <td className="p-2 bg-indigo-50 text-indigo-900 font-black">{(s.net_itc?.sgst || 0).toFixed(0)}</td>
@@ -329,11 +332,10 @@ function App() {
                     {summary.length > 0 && (
                         <tr className="bg-slate-100 font-black text-slate-900 uppercase tracking-tighter">
                              <td className="p-5 border-r border-slate-200 sticky left-0 bg-slate-100 z-10">TOTAL YEAR</td>
-                             <td className="p-2 border-r border-slate-200">{totals.table_4a.igst.toFixed(0)}</td><td className="p-2 border-r border-slate-200">{totals.table_4a.cgst.toFixed(0)}</td><td className="p-2 border-r border-slate-200">{totals.table_4a.sgst.toFixed(0)}</td>
-                             <td className="p-2 border-r border-slate-200 bg-blue-100">{totals.rule_42.igst.toFixed(0)}</td><td className="p-2 border-r border-slate-200 bg-blue-100">{totals.rule_42.cgst.toFixed(0)}</td><td className="p-2 border-r border-slate-200 bg-blue-100">{totals.rule_42.sgst.toFixed(0)}</td>
-                             <td className="p-2 border-r border-slate-200 bg-rose-100">{totals.blocked.igst.toFixed(0)}</td><td className="p-2 border-r border-slate-200 bg-rose-100">{totals.blocked.cgst.toFixed(0)}</td><td className="p-2 border-r border-slate-200 bg-rose-100">{totals.blocked.sgst.toFixed(0)}</td>
-                             <td className="p-2 border-r border-slate-200 bg-amber-100">{totals.temp_reversal.igst.toFixed(0)}</td><td className="p-2 border-r border-slate-200 bg-amber-100">{totals.temp_reversal.cgst.toFixed(0)}</td><td className="p-2 border-r border-slate-200 bg-amber-100">{totals.temp_reversal.sgst.toFixed(0)}</td>
-                             <td className="p-2 border-r border-slate-200 bg-emerald-100">{totals.reclaim_others.igst.toFixed(0)}</td><td className="p-2 border-r border-slate-200 bg-emerald-100">{totals.reclaim_others.cgst.toFixed(0)}</td><td className="p-2 border-r border-slate-200 bg-emerald-100">{totals.reclaim_others.sgst.toFixed(0)}</td>
+                             <td className="p-2 border-r border-slate-200">{totals.table_4a5.igst.toFixed(0)}</td><td className="p-2 border-r border-slate-200">{totals.table_4a5.cgst.toFixed(0)}</td><td className="p-2 border-r border-slate-200">{totals.table_4a5.sgst.toFixed(0)}</td>
+                             <td className="p-2 border-r border-slate-200 bg-blue-100">{totals.table_4b1.igst.toFixed(0)}</td><td className="p-2 border-r border-slate-200 bg-blue-100">{totals.table_4b1.cgst.toFixed(0)}</td><td className="p-2 border-r border-slate-200 bg-blue-100">{totals.table_4b1.sgst.toFixed(0)}</td>
+                             <td className="p-2 border-r border-slate-200 bg-rose-100">{totals.table_4b2.igst.toFixed(0)}</td><td className="p-2 border-r border-slate-200 bg-rose-100">{totals.table_4b2.cgst.toFixed(0)}</td><td className="p-2 border-r border-slate-200 bg-rose-100">{totals.table_4b2.sgst.toFixed(0)}</td>
+                             <td className="p-2 border-r border-slate-200 bg-amber-100">{totals.rule_42.igst.toFixed(0)}</td><td className="p-2 border-r border-slate-200 bg-amber-100">{totals.rule_42.cgst.toFixed(0)}</td><td className="p-2 border-r border-slate-200 bg-amber-100">{totals.rule_42.sgst.toFixed(0)}</td>
                              <td className="p-2 border-r border-slate-200 bg-indigo-200">{totals.net_itc.igst.toFixed(0)}</td>
                              <td className="p-2 border-r border-slate-200 bg-indigo-200">{totals.net_itc.cgst.toFixed(0)}</td>
                              <td className="p-2 bg-indigo-200">{totals.net_itc.sgst.toFixed(0)}</td>

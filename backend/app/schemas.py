@@ -1,5 +1,6 @@
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Union
+from datetime import date
 
 class ClientBase(BaseModel):
     name: str
@@ -18,7 +19,7 @@ class InvoiceBase(BaseModel):
     gstin: Optional[str]
     trade_name: Optional[str]
     invoice_number: Optional[str]
-    invoice_date: Optional[str]
+    invoice_date: Optional[date]
     rate: Optional[float]
     taxable_value: Optional[float]
     igst: Optional[float]
