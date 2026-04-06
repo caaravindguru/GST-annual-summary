@@ -11,6 +11,7 @@ function App() {
   const [turnovers, setTurnovers] = useState([]);
   const [activeTab, setActiveTab] = useState('summary');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     fetchClients();
@@ -23,33 +24,49 @@ function App() {
   }, [selectedClient]);
 
   const fetchClients = async () => {
-    const res = await fetch(`${API_BASE}/clients`);
-    const data = await res.json();
-    setClients(data);
+    try {
+        const res = await fetch(`${API_BASE}/clients`);
+        if (!res.ok) throw new Error('Failed to fetch clients');
+        const data = await res.json();
+        setClients(data);
+    } catch (err) {
+        setError(err.message);
+    }
   };
 
   const createClient = async () => {
     if (!newClientName) return;
-    await fetch(`${API_BASE}/clients`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: newClientName }),
-    });
-    setNewClientName('');
-    fetchClients();
+    try {
+        const res = await fetch(`${API_BASE}/clients`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: newClientName }),
+        });
+        if (!res.ok) throw new Error('Failed to create client');
+        setNewClientName('');
+        fetchClients();
+    } catch (err) {
+        setError(err.message);
+    }
   };
 
   const fetchData = async () => {
     setLoading(true);
+    setError(null);
     try {
         const [invRes, sumRes, turnRes] = await Promise.all([
           fetch(`${API_BASE}/clients/${selectedClient.id}/invoices`),
           fetch(`${API_BASE}/clients/${selectedClient.id}/summary`),
           fetch(`${API_BASE}/clients/${selectedClient.id}/turnover`),
         ]);
+
+        if (!invRes.ok || !sumRes.ok || !turnRes.ok) throw new Error('Data fetch failed');
+
         setInvoices(await invRes.json());
         setSummary(await sumRes.json());
         setTurnovers(await turnRes.json());
+    } catch (err) {
+        setError(err.message);
     } finally {
         setLoading(false);
     }
@@ -60,42 +77,65 @@ function App() {
     if (!file) return;
     const formData = new FormData();
     formData.append('file', file);
-    await fetch(`${API_BASE}/clients/${selectedClient.id}/upload`, {
-      method: 'POST',
-      body: formData,
-    });
-    fetchData();
-    setActiveTab('invoices');
+    setLoading(true);
+    try {
+        const res = await fetch(`${API_BASE}/clients/${selectedClient.id}/upload`, {
+          method: 'POST',
+          body: formData,
+        });
+        if (!res.ok) {
+            const detail = await res.json();
+            throw new Error(detail.detail || 'Upload failed');
+        }
+        await fetchData();
+        setActiveTab('invoices');
+    } catch (err) {
+        setError(err.message);
+    } finally {
+        setLoading(false);
+    }
   };
 
   const updateInvoice = async (id, updates) => {
-    await fetch(`${API_BASE}/invoices/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updates),
-    });
-    fetchData();
+    try {
+        const res = await fetch(`${API_BASE}/invoices/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updates),
+        });
+        if (!res.ok) throw new Error('Update failed');
+        fetchData();
+    } catch (err) {
+        setError(err.message);
+    }
   };
 
   const updateTurnover = async (month, data) => {
-    await fetch(`${API_BASE}/clients/${selectedClient.id}/turnover`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ month, ...data }),
-    });
-    fetchData();
+    try {
+        const res = await fetch(`${API_BASE}/clients/${selectedClient.id}/turnover`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ month, ...data }),
+        });
+        if (!res.ok) throw new Error('Turnover update failed');
+        fetchData();
+    } catch (err) {
+        setError(err.message);
+    }
   };
 
   const exportExcel = () => {
     window.location.href = `${API_BASE}/clients/${selectedClient.id}/export`;
   }
 
-  const totals = summary.reduce((acc, curr) => {
+  const totals = (summary || []).reduce((acc, curr) => {
     const keys = ['table_4a', 'rule_42', 'blocked', 'temp_reversal', 'reclaim_others', 'net_itc'];
     keys.forEach(k => {
-        acc[k].igst += curr[k].igst || 0;
-        acc[k].cgst += curr[k].cgst || 0;
-        acc[k].sgst += curr[k].sgst || 0;
+        if (curr[k]) {
+            acc[k].igst += curr[k].igst || 0;
+            acc[k].cgst += curr[k].cgst || 0;
+            acc[k].sgst += curr[k].sgst || 0;
+        }
     });
     return acc;
   }, {
@@ -107,6 +147,7 @@ function App() {
     return (
       <div className="p-8 max-w-2xl mx-auto font-sans">
         <h1 className="text-4xl font-extrabold mb-8 text-gray-800 tracking-tight">GST ITC RECONCILER</h1>
+        {error && <div className="bg-red-50 text-red-600 p-4 rounded-xl mb-6 font-bold border border-red-100">{error}</div>}
         <div className="bg-white p-6 shadow-2xl rounded-2xl border border-gray-200">
           <h2 className="text-xl font-semibold mb-6 text-gray-700">Select or Create Client</h2>
           <div className="grid gap-3">
@@ -121,7 +162,7 @@ function App() {
             ))}
             <div className="flex gap-2 mt-8">
               <input
-                className="border p-3 flex-grow rounded-xl focus:ring-2 focus:ring-blue-500 outline-none shadow-inner"
+                className="border p-3 flex-grow rounded-xl focus:ring-2 focus:ring-blue-500 outline-none shadow-inner text-gray-800"
                 placeholder="New Client Name"
                 value={newClientName}
                 onChange={(e) => setNewClientName(e.target.value)}
@@ -140,13 +181,18 @@ function App() {
         <div className="max-w-7xl mx-auto flex justify-between items-center text-white">
             <div className="flex items-center gap-6">
                 <h1 className="text-xl font-black uppercase tracking-widest text-blue-400">CLIENT: {selectedClient.name}</h1>
-                <button onClick={() => setSelectedClient(null)} className="text-xs font-bold text-gray-400 hover:text-white uppercase transition-colors">Switch Client</button>
+                <button onClick={() => { setSelectedClient(null); setError(null); }} className="text-xs font-bold text-gray-400 hover:text-white uppercase transition-colors">Switch Client</button>
             </div>
             <button onClick={exportExcel} className="bg-emerald-500 text-white px-6 py-2 rounded-full text-sm font-black hover:bg-emerald-600 shadow-lg transition-all active:scale-95 uppercase tracking-wider">Export to Excel</button>
         </div>
       </nav>
 
       <div className="max-w-7xl mx-auto px-4">
+        {error && <div className="bg-red-50 text-red-600 p-4 rounded-xl mb-6 font-bold border border-red-100 flex justify-between items-center">
+            <span>{error}</span>
+            <button onClick={() => setError(null)} className="text-xs uppercase tracking-widest bg-red-100 px-3 py-1 rounded-lg">Dismiss</button>
+        </div>}
+
         <div className="flex gap-10 mb-8 border-b border-slate-200">
             {['summary', 'invoices', 'turnover', 'upload'].map(tab => (
                 <button
@@ -208,9 +254,9 @@ function App() {
                             <div className="text-[10px] uppercase font-black text-slate-400">{inv.trade_name}</div>
                         </td>
                         <td className="p-5 font-mono text-slate-600">{inv.invoice_number}</td>
-                        <td className="p-5 text-right font-mono font-bold text-slate-700">{inv.igst.toLocaleString(undefined, {minimumFractionDigits:2})}</td>
-                        <td className="p-5 text-right font-mono font-bold text-slate-700">{inv.cgst.toLocaleString(undefined, {minimumFractionDigits:2})}</td>
-                        <td className="p-5 text-right font-mono font-bold text-slate-700">{inv.sgst.toLocaleString(undefined, {minimumFractionDigits:2})}</td>
+                        <td className="p-5 text-right font-mono font-bold text-slate-700">{(inv.igst || 0).toLocaleString(undefined, {minimumFractionDigits:2})}</td>
+                        <td className="p-5 text-right font-mono font-bold text-slate-700">{(inv.cgst || 0).toLocaleString(undefined, {minimumFractionDigits:2})}</td>
+                        <td className="p-5 text-right font-mono font-bold text-slate-700">{(inv.sgst || 0).toLocaleString(undefined, {minimumFractionDigits:2})}</td>
                         <td className="p-5">
                         <select
                             value={inv.status}
@@ -267,17 +313,17 @@ function App() {
                     </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                    {summary.map(s => (
+                    {(summary || []).map(s => (
                     <tr key={s.month} className="hover:bg-slate-50 font-mono font-bold text-slate-700">
                         <td className="p-4 border-r border-slate-100 bg-white sticky left-0 z-10 text-slate-900">{s.month}</td>
-                        <td className="p-2 border-r border-slate-50">{s.table_4a.igst.toFixed(0)}</td><td className="p-2 border-r border-slate-50">{s.table_4a.cgst.toFixed(0)}</td><td className="p-2 border-r border-slate-100">{s.table_4a.sgst.toFixed(0)}</td>
-                        <td className="p-2 border-r border-slate-50 bg-blue-50 text-blue-700">{s.rule_42.igst.toFixed(0)}</td><td className="p-2 border-r border-slate-50 bg-blue-50 text-blue-700">{s.rule_42.cgst.toFixed(0)}</td><td className="p-2 border-r border-slate-100 bg-blue-50 text-blue-700">{s.rule_42.sgst.toFixed(0)}</td>
-                        <td className="p-2 border-r border-slate-50 bg-rose-50 text-rose-700">{s.blocked.igst.toFixed(0)}</td><td className="p-2 border-r border-slate-50 bg-rose-50 text-rose-700">{s.blocked.cgst.toFixed(0)}</td><td className="p-2 border-r border-slate-100 bg-rose-50 text-rose-700">{s.blocked.sgst.toFixed(0)}</td>
-                        <td className="p-2 border-r border-slate-50 bg-amber-50 text-amber-700">{s.temp_reversal.igst.toFixed(0)}</td><td className="p-2 border-r border-slate-50 bg-amber-50 text-amber-700">{s.temp_reversal.cgst.toFixed(0)}</td><td className="p-2 border-r border-slate-100 bg-amber-50 text-amber-700">{s.temp_reversal.sgst.toFixed(0)}</td>
-                        <td className="p-2 border-r border-slate-50 bg-emerald-50 text-emerald-700">{s.reclaim_others.igst.toFixed(0)}</td><td className="p-2 border-r border-slate-50 bg-emerald-50 text-emerald-700">{s.reclaim_others.cgst.toFixed(0)}</td><td className="p-2 border-r border-slate-100 bg-emerald-50 text-emerald-700">{s.reclaim_others.sgst.toFixed(0)}</td>
-                        <td className="p-2 border-r border-slate-50 bg-indigo-50 text-indigo-900 font-black">{s.net_itc.igst.toFixed(0)}</td>
-                        <td className="p-2 border-r border-slate-50 bg-indigo-50 text-indigo-900 font-black">{s.net_itc.cgst.toFixed(0)}</td>
-                        <td className="p-2 bg-indigo-50 text-indigo-900 font-black">{s.net_itc.sgst.toFixed(0)}</td>
+                        <td className="p-2 border-r border-slate-50">{(s.table_4a?.igst || 0).toFixed(0)}</td><td className="p-2 border-r border-slate-50">{(s.table_4a?.cgst || 0).toFixed(0)}</td><td className="p-2 border-r border-slate-100">{(s.table_4a?.sgst || 0).toFixed(0)}</td>
+                        <td className="p-2 border-r border-slate-50 bg-blue-50 text-blue-700">{(s.rule_42?.igst || 0).toFixed(0)}</td><td className="p-2 border-r border-slate-50 bg-blue-50 text-blue-700">{(s.rule_42?.cgst || 0).toFixed(0)}</td><td className="p-2 border-r border-slate-100 bg-blue-50 text-blue-700">{(s.rule_42?.sgst || 0).toFixed(0)}</td>
+                        <td className="p-2 border-r border-slate-50 bg-rose-50 text-rose-700">{(s.blocked?.igst || 0).toFixed(0)}</td><td className="p-2 border-r border-slate-50 bg-rose-50 text-rose-700">{(s.blocked?.cgst || 0).toFixed(0)}</td><td className="p-2 border-r border-slate-100 bg-rose-50 text-rose-700">{(s.blocked?.sgst || 0).toFixed(0)}</td>
+                        <td className="p-2 border-r border-slate-50 bg-amber-50 text-amber-700">{(s.temp_reversal?.igst || 0).toFixed(0)}</td><td className="p-2 border-r border-slate-50 bg-amber-50 text-amber-700">{(s.temp_reversal?.cgst || 0).toFixed(0)}</td><td className="p-2 border-r border-slate-100 bg-amber-50 text-amber-700">{(s.temp_reversal?.sgst || 0).toFixed(0)}</td>
+                        <td className="p-2 border-r border-slate-50 bg-emerald-50 text-emerald-700">{(s.reclaim_others?.igst || 0).toFixed(0)}</td><td className="p-2 border-r border-slate-50 bg-emerald-50 text-emerald-700">{(s.reclaim_others?.cgst || 0).toFixed(0)}</td><td className="p-2 border-r border-slate-100 bg-emerald-50 text-emerald-700">{(s.reclaim_others?.sgst || 0).toFixed(0)}</td>
+                        <td className="p-2 border-r border-slate-50 bg-indigo-50 text-indigo-900 font-black">{(s.net_itc?.igst || 0).toFixed(0)}</td>
+                        <td className="p-2 border-r border-slate-50 bg-indigo-50 text-indigo-900 font-black">{(s.net_itc?.cgst || 0).toFixed(0)}</td>
+                        <td className="p-2 bg-indigo-50 text-indigo-900 font-black">{(s.net_itc?.sgst || 0).toFixed(0)}</td>
                     </tr>
                     ))}
                     {summary.length > 0 && (

@@ -2,6 +2,18 @@ import pandas as pd
 from sqlalchemy.orm import Session
 from . import models
 import io
+import re
+
+def clean_numeric(value):
+    if pd.isna(value) or value == '-':
+        return 0.0
+    if isinstance(value, str):
+        # Remove commas and other non-numeric characters except dot and minus
+        value = re.sub(r'[^\d.-]', '', value)
+    try:
+        return float(value)
+    except:
+        return 0.0
 
 def parse_excel(file_content: bytes, client_id: int):
     file_like = io.BytesIO(file_content)
@@ -30,11 +42,24 @@ def parse_excel(file_content: bytes, client_id: int):
     if 'invoice_date' in df.columns:
         df['invoice_date'] = pd.to_datetime(df['invoice_date'], errors='coerce').dt.date
 
+    # Ensure all expected columns exist and are cleaned
     for col in ['igst', 'cgst', 'sgst', 'taxable_value', 'rate']:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+        if col not in df.columns:
+            df[col] = 0.0
+        else:
+            df[col] = df[col].apply(clean_numeric)
 
-    df = df.fillna({'status': 'Unknown', 'sub_status': '', 'is_common_itc': False})
+    # Fill non-numeric missing values
+    for col in ['month', 'particular', 'gstin', 'trade_name', 'invoice_number', 'status']:
+        if col not in df.columns:
+            df[col] = ''
+        else:
+            df[col] = df[col].fillna('')
+
+    if 'status' in df.columns:
+        df['status'] = df['status'].apply(lambda x: x if x else 'Unknown')
+    else:
+        df['status'] = 'Unknown'
 
     invoices = []
     for _, row in df.iterrows():
@@ -58,17 +83,17 @@ def calculate_summary(db: Session, client_id: int):
 
         for inv in m_invs:
             if inv.particular == 'GSTR2B':
-                for k in ['igst', 'cgst', 'sgst']: s['4a'][k] += getattr(inv, k)
+                for k in ['igst', 'cgst', 'sgst']: s['4a'][k] += (getattr(inv, k) or 0.0)
             if inv.status == 'Not in books' or (inv.status == 'Ineligible' and inv.sub_status != 'Blocked'):
-                for k in ['igst', 'cgst', 'sgst']: s['temp'][k] += getattr(inv, k)
+                for k in ['igst', 'cgst', 'sgst']: s['temp'][k] += (getattr(inv, k) or 0.0)
             if inv.status == 'Ineligible' and inv.sub_status == 'Blocked':
-                for k in ['igst', 'cgst', 'sgst']: s['blocked'][k] += getattr(inv, k)
+                for k in ['igst', 'cgst', 'sgst']: s['blocked'][k] += (getattr(inv, k) or 0.0)
             if inv.is_common_itc and inv.status == 'Matched':
-                for k in ['igst', 'cgst', 'sgst']: common[k] += getattr(inv, k)
+                for k in ['igst', 'cgst', 'sgst']: common[k] += (getattr(inv, k) or 0.0)
             if inv.status == 'Matched':
                 was_not = db.query(models.Invoice).filter(models.Invoice.client_id==client_id, models.Invoice.invoice_number==inv.invoice_number, models.Invoice.status=='Not in books').first()
                 if was_not:
-                    for k in ['igst', 'cgst', 'sgst']: s['reclaim'][k] += getattr(inv, k)
+                    for k in ['igst', 'cgst', 'sgst']: s['reclaim'][k] += (getattr(inv, k) or 0.0)
 
         if t and t.total_turnover > 0:
             ratio = (t.nil_rated_turnover + t.exempt_turnover) / t.total_turnover
